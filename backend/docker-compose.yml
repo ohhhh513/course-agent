@@ -1,0 +1,43 @@
+# 课程智能体系统 · 后端容器编排
+# 本地开发不强制用容器：直接 `uvicorn app.main:app` 即可（默认 SQLite）。
+# 生产/联调建议用本编排，后端连 Postgres。
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: course_agent
+      POSTGRES_PASSWORD: course_agent
+      POSTGRES_DB: course_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U course_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    # 预留：报告生成 / 素材解析等异步任务（Celery）后续接入
+
+  backend:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://course_agent:course_agent@db:5432/course_agent
+      JWT_SECRET: change-me-in-prod-please-use-strong-random
+      CORS_ORIGINS: "*"
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
