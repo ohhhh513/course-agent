@@ -1,74 +1,50 @@
-# 数据模型与 Mock 说明
+# 数据模型与接口 data 字段说明
 
 > 适用对象：后端开发者（实现接口返回结构）、前端维护者。
-> 核心原则：**`assets/js/mock/data.js` 的每个数据对象的字段，与 `接口文档.md` 中各接口 `response.data` 字段严格一致**。后端实现真实接口时，返回 JSON 的 `data` 字段结构必须与本文档 / mock 一致，前端即可零改动切换。
+> 核心原则：**前端按本文档列出的字段结构渲染；后端接口返回的 `data` 必须与之一致，前端才能零改动消费。**
+> 早期 `assets/js/mock/data.js` 已下线，本文档现描述**真实后端返回的 `data` 结构**（字段名、类型、含义），而非某份假数据。
 
 ---
 
-## 1. Mock 数据集总览
+## 1. 数据来源说明
 
-文件：`assets/js/mock/data.js`，以 `window.MOCK` 暴露。共 45 个顶层键，按业务模块划分如下（每个键即对应一个或多个接口的 `data` 来源）：
+- 所有接口的 `data` 由 **`backend/app/routers/*` 实时计算并组装**而来，数据来自关系表（`users` / `learning_paths` / `answer_records` / `questions` / `resources` / `graph_*` / `alerts` / `chat_*` 等）。
+- 字段名统一 **camelCase**（与前端一致）；数据库列名是 snake_case（`kp_id` / `avg_mastery`），由后端在组装时转换。
+- 列表类接口统一返回 `{ total, list: [...] }`（个别接口如 `/teacher/classes` 返回裸数组，详见 §3 强依赖路径中的标注）。
 
-### 1.1 课程与用户
-| Mock 键 | 服务接口 | 说明 |
-| --- | --- | --- |
-| `course` | `GET /course/{courseId}` | 课程基本信息 |
-| `student` | `GET /auth/profile`（student 兜底） | 当前学生档案 |
-| `teacher` | `GET /auth/profile`（teacher 兜底） | 当前教师档案（含 classes） |
+### 1.1 接口 → data 结构 对照
 
-### 1.2 学生端
-| Mock 键 | 服务接口 | 说明 |
-| --- | --- | --- |
-| `studentDashboard` | `GET /student/dashboard` | 学习驾驶舱聚合 |
-| `knowledgeGraph` | `GET /graph?type=knowledge` | 知识图谱 |
-| `problemGraph` | `GET /graph?type=problem` | 问题图谱 |
-| `goalGraph` | `GET /graph?type=goal` | 目标图谱 |
-| `kpDetail` | `GET /graph/kp/{kpId}` | 知识点详情（按 kpId 索引） |
-| `learningPath` | `GET /graph/path` | 推荐学习路径 |
-| `resources` | `GET /student/resources` | 资源中心列表 |
-| `masteryMatrix` | `GET /student/mastery/matrix` | 掌握矩阵（按章分组） |
-| `abilityRadar` | `GET /student/ability/radar` | 能力雷达 |
-| `growthTrack` | `GET /student/growth` | 成长轨迹 |
-| `classCompare` | `GET /student/compare` | 班级对比 |
-| `studentAlerts` | `GET /student/alerts` | 我的预警 |
-| `messages` | `GET /student/messages` | 私信 / 系统通知 |
-| `practiceModes` | `GET /practice/modes` | 练习模式 |
-| `practiceQuestions` | `GET /practice/sessions/{id}/questions`、`POST /practice/answers` | 题库样本 |
-| `practiceReport` | `POST /practice/sessions/{id}/finish` | 练习报告 |
-| `wrongBook` | `GET /practice/wrong-book` | 错题本 |
-| `wrongDetail` | `GET /practice/wrong-book/{qId}/detail` | 错题详情 |
-
-### 1.3 AI 答疑
-| Mock 键 | 服务接口 | 说明 |
-| --- | --- | --- |
-| `teachingMethods` | `GET /ai/methods` | 教学法列表 |
-| `chatHistory` | `GET /ai/sessions` | 历史会话列表 |
-| `chatMessages` | `GET /ai/sessions/{id}/messages` | 会话消息（含 citations） |
-| `studentDashboard.suggestedQuestions` | `GET /ai/suggest-questions` | 猜你想问 |
-
-### 1.4 教师端
-| Mock 键 | 服务接口 | 说明 |
-| --- | --- | --- |
-| `teacherDashboard` | `GET /teacher/dashboard` | 教学驾驶舱 |
-| `heatmap` | `GET /teacher/heatmap` | 掌握热力图 |
-| `students` | `GET /teacher/students` | 学生列表 |
-| `studentProfile` | `GET /teacher/students/{userId}/profile` | 个体学情 |
-| `teacherAlerts` | `GET /teacher/alerts` | 预警列表 |
-| `errorAnalysis` | `GET /analysis/errors`（`weakChain`/`causes` 为其子结构） | 错题与归因 |
-| `genConfig` | `GET /question/gen/config` | 出题配置 |
-| `generatedQuestions` | `POST /question/gen` | 生成题样本 |
-| `questionBank` | `GET /question/bank` | 题库 |
-| `interventions` | `GET /intervention/list` | 干预建议 |
-| `interventionEffect` | `GET /intervention/{id}/effect` | 干预前后对比 |
-| `strategyTemplates` | `GET /intervention/templates` | 策略库模板 |
-| `reportList` | `GET /report/list` | 报告归档 |
-| `reportDetail` | `GET /report/{id}`、`POST /report/generate` | 报告详情 |
+| 接口 | 关键 data 结构 |
+| --- | --- |
+| `GET /course/{courseId}` | `course`（课程基本信息） |
+| `GET /auth/profile` | `user`（当前用户，含 `classes`） |
+| `GET /student/dashboard` | `studentDashboard`（学习驾驶舱聚合） |
+| `GET /graph?type=knowledge\|problem\|goal` | `graph`（三类图谱之一） |
+| `GET /graph/kp/{kpId}` | `kpDetail`（知识点详情） |
+| `GET /graph/path` | `learningPath`（推荐学习路径数组） |
+| `GET /student/resources` | `{ total, list }`（资源中心列表） |
+| `GET /student/mastery/matrix` | `masteryMatrix`（按章分组掌握矩阵） |
+| `GET /student/ability/radar` | `abilityRadar`（能力雷达） |
+| `GET /student/growth` | `growthTrack`（成长轨迹） |
+| `GET /student/compare` | `classCompare`（班级对比） |
+| `GET /student/alerts` | `{ total, list }`（我的预警） |
+| `GET /student/messages` | `{ total, list }`（私信/通知） |
+| `GET /practice/modes`、`/sessions/...`、`/answers`、`/wrong-book` | 练习与错题相关结构 |
+| `GET /teacher/dashboard` | `teacherDashboard`（教学驾驶舱） |
+| `GET /teacher/heatmap` | `heatmap`（掌握热力图） |
+| `GET /teacher/students` | `{ total, list }`（学生列表） |
+| `GET /teacher/students/{userId}/profile` | `studentProfile`（个体学情） |
+| `GET /analysis/errors` | `errorAnalysis`（错题与归因） |
+| `GET /question/gen/config`、`/gen`、`/bank` | 出题配置/生成/题库结构 |
+| `GET /intervention/list`、`/effect`、`/templates` | 干预与策略结构 |
+| `GET /report/list`、`/generate`、`/{id}` | 报告结构 |
+| `POST /ai/chat` | `{ messageId, sessionId, content, citations[], method, outOfScope, sourceCount }` |
 
 ---
 
 ## 2. 核心实体字段定义
 
-> 以下为前端强依赖的字段。完整字段以 `mock/data.js` 实际对象为准；后端可增字段，不可缺下列字段（或提供等价兜底）。
+> 以下为前端强依赖的字段。完整字段以后端实际返回为准；后端可增字段，**不可缺下列字段**（或提供等价兜底）。
 
 ### 2.1 User（用户）
 见 `鉴权与会话方案.md` §5。登录 / profile 返回。
@@ -188,6 +164,7 @@ GeneratedQuestion = {
 | AI 出题 | `genConfig`、`generatedQuestions[]`、`questionBank[]` |
 | 教学干预 | `interventions[]`、`interventionEffect`、`strategyTemplates[]` |
 | 学情报告 | `reportList[]`、`reportDetail.sections[]` |
+| **教师班级下拉** | `GET /teacher/classes` 返回**裸数组** `[{classId,name}]`，不是 `{list:[...]}`（前端已兼容，新增接口请勿混用两种形态） |
 
 ---
 
@@ -214,5 +191,6 @@ GeneratedQuestion = {
 
 1. **字段对齐优先于接口数量**：后端不必一次实现全部 60+ 接口，但已实现的接口返回结构必须与本文档一致。
 2. **数组字段**：列表类接口统一返回 `{ total, list:[...] }` 结构（见 `接口文档.md` 各列表接口）。
-3. **AI 答疑 mock 为关键词命中**：`mockAnswer()` 仅对「遍历 / 负权 Dijkstra / 循环队列 / 哈夫曼」四类问题返回带 citations 的答案，其余返回 `outOfScope:true` 降级文案。真实环境由后端大模型 + 检索生成。
-4. **AI 出题 mock 为预设题**：`generatedQuestions` 是写死的样本；真实环境由后端调用大模型按素材/知识点生成，并回填 `kpPath/preKp/postKp/sourceRef` 等溯源字段。
+3. **AI 答疑**：`/ai/chat` 当前由 `routers/ai.py` 的关键词答案库（`_ANSWER_BANK`）兜底，命中返回带 `citations` 的答案，未命中返回 `outOfScope:true` 降级。真实环境由后端大模型 + 检索生成（见 `后端对接指南.md` §5）。
+4. **AI 出题**：`/question/gen` 当前从现有题库随机抽题兜底，真实环境由后端调用大模型按素材/知识点生成，并回填 `kpPath/preKp/postKp/sourceRef` 等溯源字段。
+5. **题库与学情样本**：当前种子题库仅十余道、答题记录很少，导致「知识掌握率」多为 0——这是已知数据缺口，补齐后方可验证掌握率/归因的准确性。

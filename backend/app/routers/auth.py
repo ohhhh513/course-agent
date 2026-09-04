@@ -1,52 +1,98 @@
-from fastapi import APIRouter, Depends
+"""
+认证相关接口: /auth/*
+"""
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from datetime import date
 
-from ..core.envelope import BizError, Envelope, ok
-from ..core.security import DEMO_USERS, UserClaims, authenticate, create_token, get_current_user, public_user
-from ..data.seed import seed
+from ..database import get_db
+from ..models.user import User, TeacherClass
+from ..middleware.auth import hash_password, verify_password, create_jwt, get_current_user
+from ..schemas.common import ok, fail
+from ..utils import to_user_dict
 
-router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-@router.post("/login", response_model=Envelope)
-def login(payload: dict):
-    username = (payload or {}).get("username")
-    password = (payload or {}).get("password")
-    # role 仅用于前端预选标签；后端以账号库为准
-    user = authenticate(username, password)
-    token = create_token(user["userId"], user["role"])
-    return ok({"token": token, "user": public_user(user)})
+router = APIRouter(prefix="/api/v1/auth", tags=["认证"])
 
 
-@router.get("/profile", response_model=Envelope)
-def profile(claims: UserClaims = Depends(get_current_user)):
-    # 优先真实用户表，回退演示账号
-    try:
-        from ..data.seed import get_user_by_id
-        orm = get_user_by_id(claims.user_id)
-        if orm is not None:
-            return ok(orm.to_dict())
-    except Exception:
-        pass
-    user = next((u for u in DEMO_USERS.values() if u["userId"] == claims.user_id), None)
+class LoginReq(BaseModel):
+    username: str
+    password: str
+    role: str = "student"
+
+
+class ResetReq(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/login")
+def login(req: LoginReq, db: Session = Depends(get_db)):
+    """账号密码登录，返回 JWT + 用户信息"""
+    user = db.query(User).filter(User.username == req.username).first()
     if not user:
-        raise BizError(404, "用户不存在")
-    return ok(public_user(user))
+        return fail("账号不存在", 404)
+    if not verify_password(req.password, user.password):
+        return fail("密码错误，请重试", 401)
+    # 签发 JWT
+    token = create_jwt(user.user_id, user.role)
+    # 学生登录即打卡：记录今天为学习/签到日（幂等，重复登录不重复计）
+    if user.role == "student":
+        from ..models.checkin import StudyCheckin
+        _today = date.today()
+        _exists = db.query(StudyCheckin.id).filter(
+            StudyCheckin.user_id == user.user_id, StudyCheckin.day == _today
+        ).first()
+        if not _exists:
+            db.add(StudyCheckin(user_id=user.user_id, day=_today, kind="login"))
+            db.commit()
+    user_dict = to_user_dict(user)
+    # 教师班级
+    if user.role == "teacher":
+        tc_list = db.query(TeacherClass).filter(TeacherClass.teacher_user_id == user.user_id).all()
+        user_dict["classes"] = [
+            {"classId": tc.class_id, "name": tc.class_name, "studentCount": tc.student_count}
+            for tc in tc_list
+        ]
+    return ok({"token": token, "user": user_dict})
 
 
-@router.post("/reset-password", response_model=Envelope)
-def reset_password(payload: dict):
-    """演示：校验账号 + 直接重置（真实环境应叠加验证码/安全问题）。"""
-    username = (payload or {}).get("username")
-    password = (payload or {}).get("password", "")
-    if username not in DEMO_USERS:
-        raise BizError(404, "账号不存在")
-    if len(password) < 6:
-        raise BizError(400, "新密码至少 6 位")
-    DEMO_USERS[username]["password"] = password
+@router.post("/reset-password")
+def reset_password(
+    req: ResetReq,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """重置密码：必须已登录，且只能重置当前登录账号"""
+    if req.username != current_user.username:
+        return fail("只能重置当前登录账号的密码", 403)
+    user = db.query(User).filter(User.username == req.username).first()
+    if not user:
+        return fail("账号不存在", 404)
+    if not req.password or len(req.password) < 6:
+        return fail("新密码至少 6 位")
+    user.password = hash_password(req.password)
+    db.commit()
     return ok({"ok": True})
 
 
-@router.post("/logout", response_model=Envelope)
-def logout(_: UserClaims = Depends(get_current_user)):
-    # 演示：前端清会话即可；真实环境在此把 jti 进黑名单
+@router.get("/profile")
+def profile(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """获取当前登录用户信息"""
+    user_dict = to_user_dict(user)
+    if user.role == "teacher":
+        tc_list = db.query(TeacherClass).filter(TeacherClass.teacher_user_id == user.user_id).all()
+        user_dict["classes"] = [
+            {"classId": tc.class_id, "name": tc.class_name, "studentCount": tc.student_count}
+            for tc in tc_list
+        ]
+    return ok(user_dict)
+
+
+@router.post("/logout")
+def logout():
+    """退出登录（后端端可做 token 黑名单，原型仅返回成功）"""
     return ok({"ok": True})
